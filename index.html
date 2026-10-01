@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Town Drop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen atlas table — header strip, the town as a big call-out, a fuse-style timer, the map below */
+:root {
+  --sea: #cde0e3;
+  --sea-line: #b5cfd3;
+  --land: #fbfaf7;
+  --land-hover: #ffe3d6;
+  --border: #8fa9ae;
+  --ink: #13262b;
+  --muted: #557178;
+  --panel: #ffffff;
+  --accent: #e4572e;
+  --good: #23955a;
+  --near: #d99a12;
+  --bad: #cf3d3d;
+  --shadow: 0 10px 30px rgba(19, 38, 43, .14);
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sea: #0c1b21; --sea-line: #15292f; --land: #23363d; --land-hover: #5a3528;
+    --border: #46626a; --ink: #e5eff0; --muted: #8aa6ac; --panel: #15262c;
+    --accent: #ff7a4f; --good: #3fc07d; --near: #f0b53a; --bad: #ef6464;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .45); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --sea: #0c1b21; --sea-line: #15292f; --land: #23363d; --land-hover: #5a3528;
+  --border: #46626a; --ink: #e5eff0; --muted: #8aa6ac; --panel: #15262c;
+  --accent: #ff7a4f; --good: #3fc07d; --near: #f0b53a; --bad: #ef6464;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45); color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--sea); color: var(--ink); font-family: var(--display);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; display: flex; align-items: center; gap: 8px; }
+.brand svg { width: 22px; height: 22px; }
+.hud { display: flex; align-items: center; gap: 18px; font-family: var(--mono); font-size: .8rem; }
+.dots { display: flex; gap: 6px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); }
+.dot.current { border-color: var(--accent); }
+.dot.correct { background: var(--good); border-color: var(--good); }
+.dot.border { background: var(--near); border-color: var(--near); }
+.dot.wrong { background: var(--bad); border-color: var(--bad); }
+.score-label { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: .68rem; }
+.score { font-weight: 600; font-size: 1.1rem; font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; }
+
+.prompt {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 14px 16px 10px; background: var(--panel);
+}
+.prompt-text { min-width: 0; }
+.eyebrow { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.town { font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; text-wrap: balance; overflow-wrap: anywhere; }
+.feedback { font-family: var(--mono); font-size: .9rem; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chip { padding: 4px 10px; border-radius: 999px; font-weight: 600; color: var(--panel); }
+.chip.correct { background: var(--good); }
+.chip.border { background: var(--near); }
+.chip.wrong { background: var(--bad); }
+.clock { font-family: var(--mono); font-weight: 600; font-size: 2rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.clock.low { color: var(--accent); }
+.fuse { height: 6px; background: var(--sea-line); }
+.fuse > div { height: 100%; background: var(--ink); transform-origin: left; }
+.fuse.low > div { background: var(--accent); }
+
+.next {
+  background: var(--ink); color: var(--panel); border: 0; border-radius: 8px;
+  padding: 10px 18px; font-weight: 800;
+}
+
+.map-wrap { position: relative; flex: 1; min-height: 0; }
+svg#map { width: 100%; height: 100%; display: block; touch-action: none; }
+.sphere { fill: var(--sea); }
+.graticule { fill: none; stroke: var(--sea-line); stroke-width: .6; vector-effect: non-scaling-stroke; }
+.country { fill: var(--land); stroke: var(--border); stroke-width: .6; vector-effect: non-scaling-stroke; transition: fill .12s; }
+.playing .country { cursor: pointer; }
+.playing .country:hover { fill: var(--land-hover); }
+.country.is-correct, .playing .country.is-correct:hover { fill: var(--good); }
+.country.is-border { fill: var(--near); }
+.country.is-wrong { fill: var(--bad); }
+.country.is-neighbor { fill: var(--near); fill-opacity: .25; }
+.country.micro { stroke-width: 1; }
+.pin-ring { fill: none; stroke: var(--ink); vector-effect: non-scaling-stroke; stroke-width: 2; }
+.pin-dot { fill: var(--ink); }
+.pin-ring { animation: ping 1.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ping { from { transform: scale(.4); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+.pin-label { font-family: var(--display); font-weight: 800; fill: var(--ink); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+
+.zoom { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
+.zoom button {
+  width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); font-family: var(--mono); font-size: 1.1rem; box-shadow: var(--shadow);
+}
+.hint { position: absolute; left: 16px; bottom: 16px; font-family: var(--mono); font-size: .7rem; color: var(--muted); }
+
+.overlay {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 16px;
+  background: color-mix(in srgb, var(--sea) 70%, transparent);
+}
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+  padding: 24px; width: min(520px, 100%); max-height: 100%; overflow: auto; display: grid; gap: 16px;
+}
+.card h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 800; letter-spacing: -.035em; line-height: 1; margin: 0; }
+.card p { margin: 0; line-height: 1.5; color: var(--muted); max-width: 60ch; }
+.rules { display: grid; gap: 8px; font-family: var(--mono); font-size: .8rem; margin: 0; padding: 0; list-style: none; }
+.rules li { display: flex; gap: 10px; align-items: baseline; }
+.rules b { min-width: 7ch; color: var(--ink); }
+.go { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 14px 20px; font-size: 1.1rem; font-weight: 800; justify-self: start; }
+.final { font-family: var(--mono); font-size: 3rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.final small { font-size: .9rem; color: var(--muted); font-weight: 400; }
+.recap { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.recap td, .recap th { padding: 7px 4px; text-align: left; border-bottom: 1px solid var(--sea-line); }
+.recap th { font-family: var(--mono); font-size: .65rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+.recap .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.recap .sub { color: var(--muted); font-size: .78rem; }
+.mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.recap-wrap { overflow-x: auto; }
+.board { display: grid; gap: 8px; border-top: 1px solid var(--sea-line); padding-top: 14px; }
+.scores { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-family: var(--mono); font-size: .8rem; }
+.scores li { display: grid; grid-template-columns: 2.5ch 6ch 1fr auto; gap: 10px; align-items: center; padding: 5px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+.scores li.fresh { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.scores .rank { color: var(--muted); }
+.scores .pts { font-weight: 600; text-align: right; }
+.scores .when { color: var(--muted); font-size: .72rem; text-align: right; }
+.scores .seed-btn { justify-self: start; background: var(--sea); border: 1px solid var(--sea-line); border-radius: 5px; padding: 2px 7px; font-family: var(--mono); font-size: .75rem; letter-spacing: .1em; }
+.scores .seed-btn:hover { border-color: var(--border); }
+.scores .empty { display: block; color: var(--muted); padding: 4px 0; }
+
+.tip {
+  position: absolute; pointer-events: none; z-index: 2; white-space: nowrap;
+  background: var(--ink); color: var(--panel); font-weight: 800; font-size: .85rem;
+  padding: 4px 9px; border-radius: 6px; transform: translate(12px, -130%);
+}
+.seed-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seed-row label { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.seed-input {
+  font-family: var(--mono); font-weight: 600; font-size: 1.1rem; letter-spacing: .12em; text-transform: uppercase;
+  width: 11ch; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--sea); color: var(--ink);
+}
+.seed-input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.ghost { background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: .85rem; font-weight: 500; }
+.seed-note { font-size: .85rem; }
+.seed-tag { font-family: var(--mono); font-size: .7rem; color: var(--muted); letter-spacing: .06em; }
+.seed-tag b { color: var(--ink); letter-spacing: .12em; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+@media (max-width: 520px) {
+  .hint, .seed-tag#seedTag { display: none; }
+  .brand span { display: none; }
+  .clock { font-size: 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin-ring { animation: none; }
+  .country { transition: none; }
+}
+</style>
+
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z" fill="var(--accent)"/><circle cx="12" cy="9" r="2.6" fill="var(--panel)"/></svg>
+    <span>Town Drop</span>
+  </div>
+  <div class="hud">
+    <div class="seed-tag" id="seedTag" hidden>Seed <b id="seedTagValue"></b></div>
+    <div class="dots" id="dots" aria-label="Round progress"></div>
+    <div><div class="score-label">Score</div><div class="score" id="score">0</div></div>
+  </div>
+</header>
+
+<section class="prompt" aria-live="polite">
+  <div class="prompt-text">
+    <div class="eyebrow" id="eyebrow">Which country is this in?</div>
+    <div class="town" id="town">Ready when you are</div>
+    <div class="feedback" id="feedback"></div>
+  </div>
+  <div class="clock" id="clock">45.0</div>
+  <button class="next" id="next" hidden>Next town →</button>
+</section>
+<div class="fuse" id="fuse"><div id="fuseBar"></div></div>
+
+<main class="map-wrap">
+  <svg id="map" viewBox="0 0 960 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="World map. Click a country to answer."></svg>
+  <div class="tip" id="tip" hidden></div>
+  <div class="hint">Scroll or pinch to zoom · drag to pan</div>
+  <div class="zoom">
+    <button id="zin" aria-label="Zoom in">+</button>
+    <button id="zout" aria-label="Zoom out">−</button>
+    <button id="zreset" aria-label="Reset zoom">⟲</button>
+  </div>
+
+  <div class="overlay" id="startScreen">
+    <div class="card">
+      <div class="eyebrow">5 towns · 45 seconds each</div>
+      <h1>Where in the world is it?</h1>
+      <p>A town name appears. Click the country it belongs to before the fuse burns out. Faster answers score more.</p>
+      <ul class="rules">
+        <li><b style="color:var(--good)">Correct</b> 100–1000 pts, scaled by time left</li>
+        <li><b style="color:var(--near)">Neighbor</b> half points if you pick a bordering country</li>
+        <li><b style="color:var(--bad)">Miss</b> 0 pts for anything else or running out of time</li>
+      </ul>
+      <div class="seed-row">
+        <label for="seedInput">Seed</label>
+        <input class="seed-input" id="seedInput" maxlength="12" autocomplete="off" spellcheck="false">
+        <button class="ghost" id="newSeed" type="button">New seed</button>
+      </div>
+      <p class="seed-note">Same seed, same five towns. Send it to a friend and compare scores.</p>
+      <button class="go" id="start">Start game</button>
+      <div class="board">
+        <div class="eyebrow">High scores · this browser</div>
+        <ol class="scores" id="boardStart"></ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="endScreen" hidden>
+    <div class="card">
+      <div class="eyebrow">Final score</div>
+      <div class="final"><span id="final">0</span> <small>/ 5000</small></div>
+      <div class="recap-wrap">
+        <table class="recap">
+          <thead><tr><th>Town</th><th>Your pick</th><th class="num">Time</th><th class="num">Pts</th></tr></thead>
+          <tbody id="recap"></tbody>
+        </table>
+      </div>
+      <div class="seed-row">
+        <span class="seed-tag">Seed <b id="endSeed"></b></span>
+        <button class="ghost" id="copySeed" type="button">Copy seed</button>
+      </div>
+      <div class="actions">
+        <button class="go" id="again">Play a new seed</button>
+        <button class="ghost" id="replay" type="button">Replay this seed</button>
+      </div>
+      <div class="board">
+        <div class="eyebrow">High scores · this browser</div>
+        <ol class="scores" id="boardEnd"></ol>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script src="world.js"></script>
+<script src="towns.js"></script>
+<script>
+
+const TOWNS = window.TOWNS;
+
+const ROUNDS = 5, LIMIT = 45, LOW = 10;
+
+// ---- seeds ----
+// Note: picks depend on the order of TOWNS, so editing the list changes what every seed produces.
+const SEED_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O or 1/I to keep seeds easy to read aloud
+function randomSeed() {
+  return Array.from({ length: 6 }, () => SEED_CHARS[Math.floor(Math.random() * SEED_CHARS.length)]).join("");
+}
+function cleanSeed(s) { return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12); }
+function rngFromSeed(seed) {
+  let h = 1779033703 ^ seed.length;             // xmur3 string hash -> mulberry32 generator
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pickTowns(seed) {
+  const rand = rngFromSeed(seed), pool = TOWNS.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, ROUNDS);
+}
+
+// ---- map setup ----
+// Shapes drawn and scored as part of a country: Kosovo as Serbia, and the Ashmore and Cartier
+// Islands (which share Australia's code in the map data) as Australia
+const MERGES = [["Serbia", "Kosovo"], ["Australia", "Ashmore and Cartier Is."]];
+let geoms = WORLD.objects.countries.geometries;
+for (const [main, part] of MERGES) {
+  const a = geoms.find(g => g.properties.name === main), b = geoms.find(g => g.properties.name === part);
+  const merged = Object.assign(topojson.mergeArcs(WORLD, [a, b]), { id: a.id, properties: { name: main } });
+  geoms = geoms.filter(g => g !== a && g !== b).concat(merged);
+}
+const features = topojson.feature(WORLD, { type: "GeometryCollection", geometries: geoms }).features;
+const neighborIdx = topojson.neighbors(geoms);
+const byId = new Map(), neighbors = new Map();
+features.forEach((f, i) => {
+  f.key = f.id || "x" + i;               // a few territories have no ISO id
+  byId.set(f.key, f);
+  neighbors.set(f.key, new Set(neighborIdx[i].map(j => features[j].id || "x" + j)));
+});
+// Tuvalu is missing from the map data, so draw a small disc over Funafuti atoll
+const tuvalu = { type: "Feature", id: "798", key: "798", properties: { name: "Tuvalu" },
+  geometry: d3.geoCircle().center([179.2, -8.52]).radius(0.15)() };
+features.push(tuvalu); byId.set("798", tuvalu); neighbors.set("798", new Set());
+const shown = features.filter(f => f.id !== "010"); // drop Antarctica
+
+const svg = d3.select("#map");
+const projection = d3.geoNaturalEarth1().fitExtent([[8, 8], [952, 492]], { type: "Sphere" });
+const path = d3.geoPath(projection);
+const world = svg.append("g");
+world.append("path").attr("class", "sphere").attr("d", path({ type: "Sphere" }));
+world.append("path").attr("class", "graticule").attr("d", path(d3.geoGraticule10()));
+const mapWrap = document.querySelector(".map-wrap"), tip = document.getElementById("tip");
+function interactive(sel) {
+  return sel
+    .on("click", (e, d) => answer(d.key))
+    .on("pointermove", (e, d) => {
+      if (e.pointerType === "touch") return;
+      const [x, y] = d3.pointer(e, mapWrap);
+      tip.textContent = d.properties.name;
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+      tip.style.transform = x > mapWrap.clientWidth - 200 ? "translate(calc(-100% - 12px), -130%)" : "";
+      tip.hidden = false;
+    })
+    .on("pointerleave", () => { tip.hidden = true; });
+}
+interactive(world.append("g").selectAll("path").data(shown).join("path")
+  .attr("class", "country").attr("d", path));
+
+// Countries too small to hit with a pointer (Vatican City, Caribbean and Pacific islands) get a round click target,
+// placed on the country's first town in the list
+const firstTown = new Map();
+TOWNS.forEach(t => { if (!firstTown.has(t[1])) firstTown.set(t[1], t); });
+const tiny = shown.filter(f => {
+  if (!firstTown.has(f.key)) return false;
+  const [[x0, y0], [x1, y1]] = path.bounds(f);
+  return Math.max(x1 - x0, y1 - y0) < 4;
+});
+interactive(world.append("g").selectAll("circle").data(tiny).join("circle")
+  .attr("class", "country micro")
+  .attr("cx", d => projection(firstTown.get(d.key).slice(2))[0])
+  .attr("cy", d => projection(firstTown.get(d.key).slice(2))[1]));
+const allCountries = world.selectAll(".country");
+const pinLayer = world.append("g");
+
+let k = 1;
+const zoom = d3.zoom().scaleExtent([1, 24])
+  .translateExtent([[0, 0], [960, 500]])
+  .on("zoom", e => { k = e.transform.k; world.attr("transform", e.transform); sizePin(); });
+svg.call(zoom).on("dblclick.zoom", null);
+d3.select("#zin").on("click", () => svg.transition().duration(250).call(zoom.scaleBy, 1.6));
+d3.select("#zout").on("click", () => svg.transition().duration(250).call(zoom.scaleBy, 1 / 1.6));
+d3.select("#zreset").on("click", () => svg.transition().duration(350).call(zoom.transform, d3.zoomIdentity));
+
+// ---- game state ----
+const $ = id => document.getElementById(id);
+let seed = "", questions = [], round = 0, score = 0, results = [], active = false, t0 = 0, raf = 0;
+
+// ---- high scores (top 10, kept in this browser's localStorage) ----
+const BOARD_KEY = "townDropScores", BOARD_SIZE = 10;
+function loadScores() {
+  try { return JSON.parse(localStorage.getItem(BOARD_KEY)) || []; } catch { return []; }
+}
+function addScore(entry) {
+  const list = loadScores().concat(entry)
+    .sort((a, b) => b.score - a.score || a.at - b.at).slice(0, BOARD_SIZE);
+  try { localStorage.setItem(BOARD_KEY, JSON.stringify(list)); } catch {}
+  return list;
+}
+function renderBoard(fresh) {
+  const list = loadScores();
+  const fmt = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  for (const id of ["boardStart", "boardEnd"]) {
+    const ol = $(id);
+    ol.innerHTML = "";
+    if (!list.length) { ol.innerHTML = `<li class="empty">No scores yet. Finish a game to get on the board.</li>`; continue; }
+    list.forEach((s, i) => {
+      const li = document.createElement("li");
+      if (fresh && s.at === fresh.at) li.className = "fresh";
+      li.innerHTML = `<span class="rank">${i + 1}</span><span class="pts">${s.score}</span>` +
+        `<button class="seed-btn" type="button" title="Copy seed"></button><span class="when"></span>`;
+      li.querySelector(".seed-btn").textContent = s.seed;
+      li.querySelector(".seed-btn").addEventListener("click", e => useSeed(s.seed, e.currentTarget));
+      li.querySelector(".when").textContent = fmt.format(s.at);
+      ol.append(li);
+    });
+  }
+}
+// Clicking a seed on the board copies it and loads it into the seed box for the next game
+function useSeed(value, btn) {
+  $("seedInput").value = value;
+  navigator.clipboard?.writeText(value).catch(() => {});
+  btn.textContent = "Copied";
+  setTimeout(() => { btn.textContent = value; }, 1200);
+}
+
+function renderDots() {
+  $("dots").innerHTML = Array.from({ length: ROUNDS }, (_, i) => {
+    const r = results[i];
+    const cls = r ? r.kind : i === round && active ? "current" : "";
+    return `<span class="dot ${cls}"></span>`;
+  }).join("");
+}
+
+function start(withSeed) {
+  seed = cleanSeed(withSeed) || randomSeed();
+  $("seedInput").value = seed;
+  try { history.replaceState(null, "", "#" + seed); } catch {}   // the page link now carries the seed
+  $("seedTagValue").textContent = seed;
+  $("seedTag").hidden = false;
+  questions = pickTowns(seed);
+  round = 0; score = 0; results = [];
+  $("score").textContent = "0";
+  $("startScreen").hidden = true; $("endScreen").hidden = true;
+  svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+  ask();
+}
+
+function ask() {
+  clearMarks();
+  const [town] = questions[round];
+  $("eyebrow").textContent = `Town ${round + 1} of ${ROUNDS} · which country?`;
+  $("town").textContent = town;
+  $("feedback").innerHTML = "";
+  $("next").hidden = true;
+  $("clock").hidden = false;
+  active = true;
+  document.body.classList.add("playing");
+  renderDots();
+  t0 = performance.now();
+  tick();
+}
+
+function tick() {
+  const left = Math.max(0, LIMIT - (performance.now() - t0) / 1000);
+  $("clock").textContent = left.toFixed(1);
+  const low = left < LOW;
+  $("clock").classList.toggle("low", low);
+  $("fuse").classList.toggle("low", low);
+  $("fuseBar").style.transform = `scaleX(${left / LIMIT})`;
+  if (left <= 0) return answer(null);
+  raf = requestAnimationFrame(tick);
+}
+
+function answer(key) {
+  if (!active) return;
+  active = false;
+  cancelAnimationFrame(raf);
+  document.body.classList.remove("playing");
+  const elapsed = Math.min(LIMIT, (performance.now() - t0) / 1000);
+  const left = LIMIT - elapsed;
+  const [town, target, lon, lat] = questions[round];
+
+  let kind = "wrong", base = 0;
+  if (key === target) kind = "correct";
+  else if (key && neighbors.get(target).has(key)) kind = "border";
+  if (key && kind !== "wrong") base = Math.round(100 + 900 * left / LIMIT);
+  const pts = kind === "border" ? Math.round(base * 0.5) : base;
+
+  score += pts;
+  $("score").textContent = score;
+  const targetName = byId.get(target).properties.name;
+  const pickName = key ? byId.get(key).properties.name : null;
+  results.push({ town, targetName, pickName, kind, pts, time: key ? elapsed : null });
+
+  // paint the reveal
+  allCountries
+    .classed("is-correct", d => d.key === target)
+    .classed("is-border", d => kind === "border" && d.key === key)
+    .classed("is-wrong", d => kind === "wrong" && d.key === key)
+    .classed("is-neighbor", d => kind !== "correct" && d.key !== key && neighbors.get(target).has(d.key));
+  dropPin(town, lon, lat);
+
+  const label = { correct: "Correct", border: "Neighbor ×0.5", wrong: key ? "Miss" : "Time's up" }[kind];
+  const detail = kind === "correct"
+    ? `${targetName} in ${elapsed.toFixed(1)}s`
+    : `${key ? `You picked ${pickName}. ` : ""}It's in ${targetName}.`;
+  $("feedback").innerHTML = `<span class="chip ${kind}">${label} +${pts}</span><span></span>`;
+  $("feedback").lastChild.textContent = detail;
+  $("clock").hidden = true;
+  $("next").textContent = round + 1 < ROUNDS ? "Next town →" : "See results →";
+  $("next").hidden = false;
+  $("next").focus({ preventScroll: true });
+  renderDots();
+}
+
+function next() {
+  round++;
+  if (round < ROUNDS) ask(); else finish();
+}
+
+function finish() {
+  clearMarks();
+  $("town").textContent = "Game over";
+  $("eyebrow").textContent = "5 towns played";
+  $("feedback").innerHTML = "";
+  $("next").hidden = true;
+  $("final").textContent = score;
+  $("endSeed").textContent = seed;
+  const entry = { score, seed, at: Date.now() };
+  addScore(entry);
+  renderBoard(entry);
+  const color = { correct: "var(--good)", border: "var(--near)", wrong: "var(--bad)" };
+  $("recap").innerHTML = "";
+  results.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td></td><td></td><td class="num"></td><td class="num"></td>`;
+    const [a, b, c, d] = tr.children;
+    a.innerHTML = `<span class="mark" style="background:${color[r.kind]}"></span>`;
+    a.append(r.town);
+    const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = r.targetName; a.append(sub);
+    b.textContent = r.pickName || "—";
+    c.textContent = r.time == null ? "—" : r.time.toFixed(1) + "s";
+    d.textContent = r.pts;
+    $("recap").append(tr);
+  });
+  $("endScreen").hidden = false;
+  $("again").focus({ preventScroll: true });
+  renderDots();
+}
+
+function clearMarks() {
+  allCountries.classed("is-correct is-border is-wrong is-neighbor", false);
+  pinLayer.selectAll("*").remove();
+}
+
+function dropPin(name, lon, lat) {
+  const [x, y] = projection([lon, lat]);
+  const g = pinLayer.append("g").attr("transform", `translate(${x},${y})`);
+  g.append("circle").attr("class", "pin-ring");
+  g.append("circle").attr("class", "pin-dot");
+  g.append("text").attr("class", "pin-label").text(name);
+  sizePin();
+}
+function sizePin() {
+  world.selectAll(".micro").attr("r", 4 / k);
+  pinLayer.selectAll(".pin-ring").attr("r", 7 / k);
+  pinLayer.selectAll(".pin-dot").attr("r", 3.2 / k);
+  pinLayer.selectAll(".pin-label").attr("x", 7 / k).attr("y", -6 / k).attr("font-size", 13 / k)
+    .style("stroke-width", 3 / k + "px");
+}
+
+$("start").addEventListener("click", () => start($("seedInput").value));
+$("seedInput").addEventListener("keydown", e => { if (e.key === "Enter") start($("seedInput").value); });
+$("seedInput").addEventListener("input", e => { e.target.value = cleanSeed(e.target.value); });
+$("newSeed").addEventListener("click", () => { $("seedInput").value = randomSeed(); });
+$("again").addEventListener("click", () => start(randomSeed()));
+$("replay").addEventListener("click", () => start(seed));
+$("copySeed").addEventListener("click", async () => {
+  const btn = $("copySeed");
+  try { await navigator.clipboard.writeText(seed); btn.textContent = "Copied"; }
+  catch { btn.textContent = "Copy failed. Seed: " + seed; }
+  setTimeout(() => { btn.textContent = "Copy seed"; }, 1600);
+});
+sizePin();
+$("seedInput").value = cleanSeed(decodeURIComponent(location.hash.slice(1))) || randomSeed();
+$("next").addEventListener("click", next);
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !$("next").hidden && document.activeElement !== $("next")) next();
+});
+renderDots();
+renderBoard();
+$("fuseBar").style.transform = "scaleX(1)";
+</script>
+</body>
+</html>
